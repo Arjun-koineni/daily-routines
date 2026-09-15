@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Life Routine Dashboard | Performance & Consistency Engine</title>
+  <meta name="description" content="High-performance interactive life routine visualizer, readiness scoring engine, and compounding habit coach." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <!-- Chart.js for high-fidelity interactive visualizations -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="dark-theme">
+  <!-- Top Navigation / Status Header -->
+  <header class="app-header">
+    <div class="brand-area">
+      <div class="logo-badge">
+        <span class="logo-icon">⚡</span>
+      </div>
+      <div>
+        <h1 class="brand-title">Life Routine <span class="accent-text">Engine</span></h1>
+        <p class="brand-subtitle">Sequential Daily Architecture • Zero Fixed Clocks • Compounding Gains</p>
+      </div>
+    </div>
+
+    <!-- Sequence Badge Flow -->
+    <div class="sequence-nav">
+      <div class="seq-step" title="Morning Block">
+        <span class="seq-dot study-dot"></span>
+        <span class="seq-label">Morning: Deep Work</span>
+      </div>
+      <span class="seq-arrow">→</span>
+      <div class="seq-step" title="Evening Block">
+        <span class="seq-dot gym-dot"></span>
+        <span class="seq-label">Evening: Gym (5D)</span>
+      </div>
+      <span class="seq-arrow">→</span>
+      <div class="seq-step" title="Post-Gym Block">
+        <span class="seq-dot diet-dot"></span>
+        <span class="seq-label">Post-Gym: Diet & Rec</span>
+      </div>
+      <span class="seq-arrow">→</span>
+      <div class="seq-step" title="Night Block">
+        <span class="seq-dot sleep-dot"></span>
+        <span class="seq-label">Night: Sleep (6–8h)</span>
+      </div>
+    </div>
+
+    <!-- Top Action Bar -->
+    <div class="header-actions">
+      <div class="streak-pill" id="globalStreakPill" title="Consecutive days routine completed">
+        <span class="flame-icon">🔥</span>
+        <span class="streak-count" id="streakCount">14</span>
+        <span class="streak-label">Day Streak</span>
+      </div>
+      <button class="btn btn-secondary" id="btnExport" title="Export your routine config & summary">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+        <span>Export</span>
+      </button>
+      <button class="btn btn-ghost" id="btnReset" title="Reset to standard default routine">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+        <span>Reset</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Cockpit Layout: 3 Columns on Desktop, Single Screen Fit -->
+  <main class="cockpit-container">
+    
+    <!-- COLUMN 1: Inputs, Goal Calibration & Buffer Card -->
+    <section class="panel-column inputs-column" id="controlsSection">
+      
+      <!-- Goal Persona Presets -->
+      <div class="card goal-card">
+        <div class="card-header-compact">
+          <span class="card-tag">GOAL CALIBRATION</span>
+          <span class="info-bubble" title="Dynamically adjusts scoring engine weights">Weight Preset</span>
+        </div>
+        <div class="goal-pill-group" id="goalPresets">
+          <button class="goal-pill active" data-goal="muscle">
+            <span class="goal-icon">💪</span>
+            <span class="goal-text">Muscle Gain</span>
+          </button>
+          <button class="goal-pill" data-goal="fatloss">
+            <span class="goal-icon">🔥</span>
+            <span class="goal-text">Fat Loss</span>
+          </button>
+          <button class="goal-pill" data-goal="exam">
+            <span class="goal-icon">🧠</span>
+            <span class="goal-text">Exam / Deep Work</span>
+          </button>
+          <button class="goal-pill" data-goal="balanced">
+            <span class="goal-icon">⚖️</span>
+            <span class="goal-text">Balanced</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Live Sliders & Numbers Panel -->
+      <div class="card input-controls-card">
+        <div class="card-title-row">
+          <h2 class="card-title">Daily Inputs</h2>
+          <span class="badge-subtle">Live Sync</span>
+        </div>
+
+        <form id="routineForm" onsubmit="event.preventDefault();" class="sliders-list">
+          
+          <!-- Study / Deep Work Slider -->
+          <div class="slider-group study-theme">
+            <div class="slider-meta">
+              <label for="studyHoursInput" class="slider-label">
+                <span class="category-indicator study-bg"></span>
+                <span>Study / Deep Work</span>
+              </label>
+              <div class="num-input-wrap">
+                <input type="number" id="studyHoursInput" min="0" max="16" step="0.5" value="6.0" />
+                <span class="unit">hrs</span>
+              </div>
+            </div>
+            <input type="range" id="studyHoursSlider" min="0" max="16" step="0.5" value="6.0" class="custom-range" />
+            <div class="slider-range-legend">
+              <span>0h</span>
+              <span class="opt-marker">Optimal: 4–8h</span>
+              <span>16h</span>
+            </div>
+          </div>
+
+          <!-- Gym Session Duration Slider -->
+          <div class="slider-group gym-theme">
+            <div class="slider-meta">
+              <label for="gymHoursInput" class="slider-label">
+                <span class="category-indicator gym-bg"></span>
+                <span>Gym Session Length</span>
+              </label>
+              <div class="num-input-wrap">
+                <input type="number" id="gymHoursInput" min="0" max="3.5" step="0.25" value="1.5" />
+                <span class="unit">hrs</span>
+              </div>
+            </div>
+            <input type="range" id="gymHoursSlider" min="0" max="3.5" step="0.25" value="1.5" class="custom-range" />
+            <div class="slider-range-legend">
+              <span>0h</span>
+              <span class="opt-marker">Optimal: 1.25–1.75h</span>
+              <span>3.5h</span>
+            </div>
+          </div>
+
+          <!-- Diet & Meal Prep Slider -->
+          <div class="slider-group diet-theme">
+            <div class="slider-meta">
+              <label for="dietHoursInput" class="slider-label">
+                <span class="category-indicator diet-bg"></span>
+                <span>Diet & Meal Recovery</span>
+              </label>
+              <div class="num-input-wrap">
+                <input type="number" id="dietHoursInput" min="0.5" max="4" step="0.25" value="1.5" />
+                <span class="unit">hrs</span>
+              </div>
+            </div>
+            <input type="range" id="dietHoursSlider" min="0.5" max="4" step="0.25" value="1.5" class="custom-range" />
+            <div class="slider-range-legend">
+              <span>0.5h</span>
+              <span class="opt-marker">Fueling & MPS</span>
+              <span>4h</span>
+            </div>
+          </div>
+
+          <!-- Sleep Hours Slider (Strict 6 - 8h Hard Limit) -->
+          <div class="slider-group sleep-theme">
+            <div class="slider-meta">
+              <label for="sleepHoursInput" class="slider-label">
+                <span class="category-indicator sleep-bg"></span>
+                <span>Night Sleep <span class="strict-tag">Strict 6–8h</span></span>
+              </label>
+              <div class="num-input-wrap">
+                <input type="number" id="sleepHoursInput" min="6.0" max="8.0" step="0.25" value="7.5" />
+                <span class="unit">hrs</span>
+              </div>
+            </div>
+            <input type="range" id="sleepHoursSlider" min="6.0" max="8.0" step="0.25" value="7.5" class="custom-range" />
+            <div class="slider-range-legend strict-legend">
+              <span>6.0h (Min)</span>
+              <span class="opt-marker">Golden: 7.5h</span>
+              <span>8.0h (Max)</span>
+            </div>
+          </div>
+
+          <!-- Gym Days Per Week Slider -->
+          <div class="slider-group frequency-theme">
+            <div class="slider-meta">
+              <label for="gymDaysInput" class="slider-label">
+                <span class="category-indicator freq-bg"></span>
+                <span>Gym Days / Week</span>
+              </label>
+              <div class="num-input-wrap">
+                <input type="number" id="gymDaysInput" min="0" max="7" step="1" value="5" />
+                <span class="unit">days</span>
+              </div>
+            </div>
+            <input type="range" id="gymDaysSlider" min="0" max="7" step="1" value="5" class="custom-range" />
+            <div class="slider-range-legend">
+              <span>0 Days</span>
+              <span class="opt-marker target-highlight">Target: 5 Days</span>
+              <span>7 Days</span>
+            </div>
+          </div>
+
+        </form>
+      </div>
+
+      <!-- Prominent Remaining Buffer Card -->
+      <div class="card buffer-card" id="bufferCard">
+        <div class="buffer-header">
+          <div>
+            <span class="metric-label">24H ALLOCATION</span>
+            <div class="buffer-time-display">
+              <span class="buffer-hours" id="bufferHoursValue">7.5</span>
+              <span class="buffer-unit">Hours</span>
+            </div>
+          </div>
+          <div class="buffer-status-badge" id="bufferStatusBadge">
+            Optimal Buffer
+          </div>
+        </div>
+        <p class="buffer-desc" id="bufferDesc">
+          Remaining free buffer for commute, wind-down, hydration & personal balance.
+        </p>
+        <div class="buffer-progress-track">
+          <div class="buffer-progress-bar" id="bufferProgressBar" style="width: 31.25%;"></div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- COLUMN 2: Multi-Visualizations & Weekly Strip -->
+    <section class="panel-column visual-column" id="visualsSection">
+      
+      <!-- Top Viz Row: Donut + Bar Chart -->
+      <div class="viz-duo-grid">
+        
+        <!-- 24h Donut Chart with Centered Active Hours -->
+        <div class="card viz-card donut-viz-card">
+          <div class="card-title-row compact">
+            <h3 class="card-title">24-Hour Allocation</h3>
+            <span class="pill-mini">Full Day</span>
+          </div>
+          <div class="donut-wrapper">
+            <canvas id="donutChart"></canvas>
+            <div class="donut-center-metric">
+              <span class="center-caption">ACTIVE HOURS</span>
+              <span class="center-val" id="centerActiveHours">16.5</span>
+              <span class="center-sub">/ 24.0 hrs</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Horizontal Bar Chart -->
+        <div class="card viz-card bar-viz-card">
+          <div class="card-title-row compact">
+            <h3 class="card-title">Category Breakdown</h3>
+            <span class="pill-mini">Sorted</span>
+          </div>
+          <div class="bar-wrapper">
+            <canvas id="barChart"></canvas>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Weekly 7-Day Consistency Strip -->
+      <div class="card weekly-strip-card">
+        <div class="card-title-row compact">
+          <div>
+            <h3 class="card-title">7-Day Consistency Matrix</h3>
+            <span class="card-subtitle">Click days to customize your 5-Gym / 2-Rest split</span>
+          </div>
+          <div class="strip-summary" id="stripSummaryBadge">
+            5 Gym Days • 2 Rest Days
+          </div>
+        </div>
+        
+        <div class="weekly-strip-grid" id="weeklyStrip">
+          <!-- Populated dynamically via app.js -->
+        </div>
+      </div>
+
+      <!-- Balance Radar Chart -->
+      <div class="card radar-card">
+        <div class="card-title-row compact">
+          <div>
+            <h3 class="card-title">Balance Radar</h3>
+            <span class="card-subtitle">Scored across 4 core performance pillars</span>
+          </div>
+          <div class="radar-score-legend">
+            <span class="legend-dot focus"></span> Focus
+            <span class="legend-dot fitness"></span> Fitness
+            <span class="legend-dot recovery"></span> Recovery
+            <span class="legend-dot discipline"></span> Discipline
+          </div>
+        </div>
+        <div class="radar-wrapper">
+          <canvas id="radarChart"></canvas>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- COLUMN 3: Scoring Engine, AI Motivation, Accountability & Adherence -->
+    <section class="panel-column coach-column" id="coachSection">
+      
+      <!-- Readiness Score Card with Visible Formula -->
+      <div class="card readiness-card" id="readinessCard">
+        <div class="readiness-main-row">
+          <div class="readiness-dial">
+            <svg class="score-circle-svg" viewBox="0 0 120 120">
+              <circle class="score-circle-bg" cx="60" cy="60" r="50"></circle>
+              <circle class="score-circle-bar" id="scoreCircleBar" cx="60" cy="60" r="50"></circle>
+            </svg>
+            <div class="dial-content">
+              <span class="score-number" id="readinessScoreVal">92</span>
+              <span class="score-scale">/100</span>
+            </div>
+          </div>
+          <div class="readiness-meta">
+            <span class="card-tag">SYSTEM READINESS</span>
+            <h2 class="readiness-title" id="readinessTierText">Peak Prime State</h2>
+            <p class="readiness-caption" id="readinessTierDesc">
+              Hormonal recovery & deep cognitive focus are synchronized.
+            </p>
+            <button class="formula-toggle-btn" id="btnToggleFormula">
+              <span class="fx-icon">ƒ(x)</span> View Scoring Formula
+            </button>
+          </div>
+        </div>
+
+        <!-- Expandable Formula Breakdown Drawer -->
+        <div class="formula-drawer" id="formulaDrawer">
+          <div class="formula-header">
+            <span class="f-label">Readiness Formula Breakdown:</span>
+            <code class="f-code">Base(100) - Penalties + Bonuses</code>
+          </div>
+          <ul class="formula-list" id="formulaList">
+            <!-- Dynamically populated breakdown items -->
+          </ul>
+        </div>
+      </div>
+
+      <!-- AI Motivation Layer Card -->
+      <div class="card coach-speech-card">
+        <div class="card-title-row compact">
+          <div class="coach-avatar-row">
+            <div class="coach-avatar">⚡</div>
+            <div>
+              <h3 class="card-title">AI Performance Coach</h3>
+              <span class="coach-status-pulse">● Live Feedback</span>
+            </div>
+          </div>
+          <span class="badge-glow" id="coachMoodBadge">Dialed In</span>
+        </div>
+
+        <div class="coach-message-box" id="coachMessage">
+          <!-- Dynamic high-impact reactive text -->
+        </div>
+
+        <!-- 30 / 90-Day Compounding Forecast -->
+        <div class="compounding-forecast-grid">
+          <div class="forecast-card">
+            <span class="forecast-period">30-DAY PROJECTION</span>
+            <div class="forecast-stat" id="forecast30Gym">21 Sessions</div>
+            <p class="forecast-detail" id="forecast30Detail">~126h deep work banked, neural pathways primed.</p>
+          </div>
+          <div class="forecast-card highlight">
+            <span class="forecast-period">90-DAY QUARTER GOAL</span>
+            <div class="forecast-stat" id="forecast90Gym">65 Sessions</div>
+            <p class="forecast-detail" id="forecast90Detail">~378h mastery. Significant hypertrophy & metabolic shift.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Accountability: What I Lose If I Skip Today -->
+      <div class="card accountability-card">
+        <div class="card-title-row compact">
+          <div class="danger-header">
+            <span class="danger-icon">⚠️</span>
+            <h3 class="card-title">The Cost of Skipping Today</h3>
+          </div>
+          <div class="loss-switch-pills" id="lossCategoryTabs">
+            <button class="loss-pill active" data-type="gym">Skip Gym</button>
+            <button class="loss-pill" data-type="sleep">Poor Sleep</button>
+            <button class="loss-pill" data-type="study">Skip Study</button>
+          </div>
+        </div>
+
+        <div class="loss-content-box" id="lossContentBox">
+          <!-- Dynamically populated loss calculation over 90 days -->
+        </div>
+      </div>
+
+      <!-- Interactive 4-Week Adherence Log -->
+      <div class="card adherence-card">
+        <div class="card-title-row compact">
+          <div>
+            <h3 class="card-title">4-Week Adherence Tracker</h3>
+            <span class="card-subtitle">Mark each day: ✅ Done or ❌ Missed</span>
+          </div>
+          <div class="adherence-rate-pill">
+            <span class="rate-val" id="adherenceRateVal">92%</span>
+            <span class="rate-lbl">Adherence</span>
+          </div>
+        </div>
+
+        <!-- 28-day interactive calendar dots -->
+        <div class="adherence-calendar-grid" id="adherenceGrid">
+          <!-- Populated via app.js -->
+        </div>
+
+        <div class="adherence-footer-stats">
+          <div class="stat-mini">
+            <span class="lbl">Completed:</span>
+            <strong id="completedDaysCount">26</strong>/28
+          </div>
+          <div class="stat-mini">
+            <span class="lbl">Missed:</span>
+            <strong id="missedDaysCount" class="missed-text">2</strong>
+          </div>
+          <div class="stat-mini">
+            <span class="lbl">Compounding Index:</span>
+            <strong id="compoundingGrade" class="grade-text">A+ Elite</strong>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- Export & Routine Summary Modal -->
+  <div class="modal-backdrop" id="exportModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">📋</span>
+          <h3>Export & Save My Routine</h3>
+        </div>
+        <button class="modal-close-btn" id="btnCloseModal">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <p class="modal-subtitle">Your synchronized blueprint is ready. Export as JSON, copy formatted summary, or save to browser cache.</p>
+        
+        <div class="export-preview-box">
+          <pre><code id="exportSummaryText">Loading routine blueprint...</code></pre>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-ghost" id="btnSaveLocal">💾 Save to Browser Cache</button>
+        <button class="btn btn-secondary" id="btnCopyClipboard">📋 Copy Summary</button>
+        <button class="btn btn-primary" id="btnDownloadJson">⬇️ Download JSON</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div class="toast-notification" id="toast">Routine Saved Successfully!</div>
+
+  <script src="app.js"></script>
+</body>
+</html>
