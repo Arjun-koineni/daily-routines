@@ -11,6 +11,11 @@
   // =========================================================================
 
   const STORAGE_KEY = "ninety_regimen_v1";
+  const CLOUD_CONFIG_KEY = "ninety_cloud_config";
+
+  let supabaseClient = null;
+  let currentUser = null;
+  let currentProfile = null; // { id, email, role: 'admin'|'member', status: 'pending'|'approved'|'revoked' }
 
   // Exact 5-day workout splits provided by user
   const DEFAULT_WORKOUTS = {
@@ -115,6 +120,14 @@
     "🧘 Mobility: Complete 5-10 min post-lift stretching"
   ];
 
+  // Helper: Format a Date object to YYYY-MM-DD in local time (prevents UTC timezone shift bug)
+  function formatLocalDateToISO(d) {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
   // Helper: calculate default next Monday start date
   function getNextMondayDateString() {
     const d = new Date();
@@ -122,11 +135,11 @@
     const daysUntilNextMonday = ((8 - day) % 7) || 7;
     const nextMon = new Date(d);
     nextMon.setDate(d.getDate() + daysUntilNextMonday);
-    return nextMon.toISOString().split("T")[0];
+    return formatLocalDateToISO(nextMon);
   }
 
   function getTodayDateString() {
-    return new Date().toISOString().split("T")[0];
+    return formatLocalDateToISO(new Date());
   }
 
   // =========================================================================
@@ -135,7 +148,7 @@
 
   let appState = {
     version: 1,
-    startDate: getNextMondayDateString(), // Defaults to Next Week
+    startDate: getTodayDateString(),     // Defaults to Today so Day 1 starts right away
     customWorkouts: {},                  // Overrides by dayOfWeek (0-6)
     customDiets: {},                     // Overrides by dayOfWeek (0-6)
     customDos: [...DEFAULT_DOS],         // Daily Do's
@@ -151,6 +164,12 @@
       if (raw) {
         const parsed = JSON.parse(raw);
         appState = Object.assign({}, appState, parsed);
+        // If old default set startDate to future Monday, reset to today so user's regimen is active immediately
+        if (appState.startDate > getTodayDateString() && (!appState.logs || Object.keys(appState.logs).length === 0)) {
+          appState.startDate = getTodayDateString();
+        }
+      } else {
+        appState.startDate = getTodayDateString();
       }
     } catch (e) {
       console.warn("Could not parse saved state, using defaults.", e);
@@ -160,6 +179,9 @@
   function saveState() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
+      if (typeof syncSaveRegimen === "function") {
+        syncSaveRegimen(appState);
+      }
     } catch (e) {
       console.error("Failed to save state to localStorage", e);
     }
@@ -188,7 +210,7 @@
   function addDays(dateStr, n) {
     const d = parseLocalDate(dateStr);
     d.setDate(d.getDate() + n);
-    return d.toISOString().split("T")[0];
+    return formatLocalDateToISO(d);
   }
 
   function daysDifference(dateStrA, dateStrB) {
@@ -253,26 +275,29 @@
     for (let i = 0; i < challengeDays.length; i++) {
       const item = challengeDays[i];
       const date = item.date;
-      if (date > today) break; // Future day
+      if (date > today) break; // Future days do not count towards streak yet
 
       const dayOfWeek = getDayOfWeek(date);
-      const isGymDay = (DEFAULT_WORKOUTS[dayOfWeek] && DEFAULT_WORKOUTS[dayOfWeek].isGymDay);
+      const workout = (appState.customWorkouts && appState.customWorkouts[dayOfWeek]) || DEFAULT_WORKOUTS[dayOfWeek];
+      const isGymDay = workout ? workout.isGymDay : true;
       if (isGymDay && !item.isFrozen) totalGymDaysScheduled++;
 
       const log = appState.logs[date];
       const isFrozen = item.isFrozen;
 
       if (isFrozen) {
-        // Paused/frozen day preserves streak without breaking or advancing
+        // Paused/frozen day preserves streak without breaking
         continue;
       }
 
+      const isToday = (date === today);
+
       if (log) {
-        if (log.sleep !== undefined) {
+        if (log.sleep !== undefined && log.sleep !== null && !isNaN(log.sleep)) {
           totalSleepLogged += Number(log.sleep);
           sleepLogCount++;
         }
-        if (log.water !== undefined) {
+        if (log.water !== undefined && log.water !== null && !isNaN(log.water)) {
           totalWaterLogged += Number(log.water);
           waterLogCount++;
         }
@@ -282,19 +307,25 @@
         }
 
         // Qualifying day for streak:
-        // If it's a gym day, workoutDone should be true or logged.
-        // If rest day, logging sleep/water/diet keeps streak alive!
-        const completedDay = isGymDay ? (log.workoutDone === true) : true;
+        // Gym day: workoutDone is true.
+        // Rest day: logging workout, sleep, water, or diet qualifies.
+        const completedDay = isGymDay 
+          ? (log.workoutDone === true) 
+          : (log.workoutDone || log.sleep !== undefined || log.water !== undefined || (log.checkedDiet && log.checkedDiet.length > 0));
 
         if (completedDay) {
           tempStreak++;
           if (tempStreak > bestStreak) bestStreak = tempStreak;
         } else {
-          tempStreak = 0;
+          // If past day missed -> reset streak
+          // If today is in progress -> do NOT reset streak
+          if (!isToday) {
+            tempStreak = 0;
+          }
         }
       } else {
-        // Not logged and date is in the past
-        if (date < today) {
+        // Not logged and date is in the past -> reset streak
+        if (!isToday) {
           tempStreak = 0;
         }
       }
@@ -349,11 +380,14 @@
     dotsGrid: document.getElementById("dotsGrid"),
     progressTimelineText: document.getElementById("progressTimelineText"),
 
-    // Today Section
+    // Today Section & Date Navigation
     todayDateTitle: document.getElementById("todayDateTitle"),
     todayDaySubtitle: document.getElementById("todayDaySubtitle"),
     todayGymBadge: document.getElementById("todayGymBadge"),
     btnJumpToToday: document.getElementById("btnJumpToToday"),
+    btnPrevDay: document.getElementById("btnPrevDay"),
+    btnNextDay: document.getElementById("btnNextDay"),
+    dateNavInput: document.getElementById("dateNavInput"),
 
     // Workout
     workoutTitle: document.getElementById("workoutTitle"),
@@ -430,7 +464,59 @@
     modalSettings: document.getElementById("modalSettings"),
     inputStartDate: document.getElementById("inputStartDate"),
     btnSaveSettings: document.getElementById("btnSaveSettings"),
-    btnCloseSettings: document.getElementById("btnCloseSettings")
+    btnCloseSettings: document.getElementById("btnCloseSettings"),
+
+    // Top Bar Auth & Admin
+    btnAdminPanel: document.getElementById("btnAdminPanel"),
+    btnAuth: document.getElementById("btnAuth"),
+    authBtnLabel: document.getElementById("authBtnLabel"),
+
+    // Auth Modal
+    modalAuth: document.getElementById("modalAuth"),
+    authModalTitle: document.getElementById("authModalTitle"),
+    btnCloseAuthModal: document.getElementById("btnCloseAuthModal"),
+    tabSignIn: document.getElementById("tabSignIn"),
+    tabSignUp: document.getElementById("tabSignUp"),
+    tabAdmin: document.getElementById("tabAdmin"),
+    authCapacityNotice: document.getElementById("authCapacityNotice"),
+    authErrorMsg: document.getElementById("authErrorMsg"),
+    formAuth: document.getElementById("formAuth"),
+    authEmail: document.getElementById("authEmail"),
+    authPassword: document.getElementById("authPassword"),
+    authPasswordHint: document.getElementById("authPasswordHint"),
+    btnAuthSubmit: document.getElementById("btnAuthSubmit"),
+    btnToggleCloudConfig: document.getElementById("btnToggleCloudConfig"),
+    cloudConfigWrap: document.getElementById("cloudConfigWrap"),
+    inputSupabaseUrl: document.getElementById("inputSupabaseUrl"),
+    inputSupabaseKey: document.getElementById("inputSupabaseKey"),
+    btnSaveCloudConfig: document.getElementById("btnSaveCloudConfig"),
+
+    // Gate Views
+    gatePendingApproval: document.getElementById("gatePendingApproval"),
+    pendingUserEmail: document.getElementById("pendingUserEmail"),
+    btnCheckApproval: document.getElementById("btnCheckApproval"),
+    btnPendingSignOut: document.getElementById("btnPendingSignOut"),
+    gateRevoked: document.getElementById("gateRevoked"),
+    btnRevokedSignOut: document.getElementById("btnRevokedSignOut"),
+
+    // User Profile Modal
+    modalUserProfile: document.getElementById("modalUserProfile"),
+    btnCloseUserProfile: document.getElementById("btnCloseUserProfile"),
+    profileAvatar: document.getElementById("profileAvatar"),
+    profileEmail: document.getElementById("profileEmail"),
+    profileRoleBadge: document.getElementById("profileRoleBadge"),
+    btnSignOut: document.getElementById("btnSignOut"),
+
+    // Admin Console
+    modalAdminPanel: document.getElementById("modalAdminPanel"),
+    btnCloseAdminPanel: document.getElementById("btnCloseAdminPanel"),
+    adminCapacityCount: document.getElementById("adminCapacityCount"),
+    adminCapacityFill: document.getElementById("adminCapacityFill"),
+    pendingCount: document.getElementById("pendingCount"),
+    pendingUsersList: document.getElementById("pendingUsersList"),
+    activeMembersCount: document.getElementById("activeMembersCount"),
+    activeMembersList: document.getElementById("activeMembersList"),
+    btnRefreshAdminData: document.getElementById("btnRefreshAdminData")
   };
 
   function showToast(msg) {
@@ -505,7 +591,8 @@
       dot.setAttribute("data-date", item.date);
 
       const dayOfWeek = getDayOfWeek(item.date);
-      const isGymDay = DEFAULT_WORKOUTS[dayOfWeek] && DEFAULT_WORKOUTS[dayOfWeek].isGymDay;
+      const workout = (appState.customWorkouts && appState.customWorkouts[dayOfWeek]) || DEFAULT_WORKOUTS[dayOfWeek];
+      const isGymDay = workout ? workout.isGymDay : true;
       const log = appState.logs[item.date];
 
       if (item.isFrozen) {
@@ -515,9 +602,15 @@
         if (log.workoutDone) {
           dot.classList.add("dot-completed");
           dot.title = `${formatDateFriendly(item.date)}: Day ${item.dayNumber} - Completed (Gym Done)`;
-        } else {
+        } else if (!isGymDay && (log.sleep || log.water || (log.checkedDiet && log.checkedDiet.length > 0))) {
           dot.classList.add("dot-rest");
-          dot.title = `${formatDateFriendly(item.date)}: Day ${item.dayNumber} - Logged (${isGymDay ? "Gym Skipped" : "Rest Day"})`;
+          dot.title = `${formatDateFriendly(item.date)}: Day ${item.dayNumber} - Rest Day Logged`;
+        } else if (item.date < today) {
+          dot.classList.add("dot-missed");
+          dot.title = `${formatDateFriendly(item.date)}: Day ${item.dayNumber} - Missed`;
+        } else {
+          dot.classList.add("dot-upcoming");
+          dot.title = `${formatDateFriendly(item.date)}: Day ${item.dayNumber} - In Progress`;
         }
       } else if (item.date < today) {
         dot.classList.add("dot-missed");
@@ -531,10 +624,14 @@
         dot.classList.add("dot-today");
       }
 
+      if (item.date === viewingDate) {
+        dot.classList.add("dot-selected");
+      }
+
       // Clicking dot views that day
       dot.addEventListener("click", () => {
         viewingDate = item.date;
-        renderTodaySection();
+        renderAll();
         showToast(`Viewing ${formatDateFriendly(item.date)}`);
       });
 
@@ -548,9 +645,21 @@
     const dateStr = viewingDate;
     const dayOfWeek = getDayOfWeek(dateStr);
     const challengeDays = getChallengeDaysList();
+    const isFrozen = !!(appState.frozenDates && appState.frozenDates[dateStr]);
+
+    // Sync Date Picker Input
+    if (elements.dateNavInput) {
+      elements.dateNavInput.value = dateStr;
+    }
+
     const found = challengeDays.find(d => d.date === dateStr);
-    const dayNum = found ? found.dayNumber : 1;
-    const isFrozen = !!appState.frozenDates[dateStr];
+    let dayNum = 1;
+    if (found) {
+      dayNum = found.dayNumber;
+    } else {
+      const diff = daysDifference(appState.startDate, dateStr);
+      dayNum = diff >= 0 ? diff + 1 : 1;
+    }
 
     // Toggle Jump to Today button
     if (viewingDate !== today) {
@@ -559,28 +668,40 @@
       elements.btnJumpToToday.classList.add("hidden");
     }
 
-    elements.todayDateText = document.getElementById("todayDateTitle");
-    elements.todayDateText.textContent = formatDateFriendly(dateStr);
-    elements.todayDaySubtitle.textContent = isFrozen
-      ? `Day ${dayNum} of 90 • Holiday / Frozen`
-      : `Day ${dayNum} of 90`;
-
-    // Workout split retrieval (custom or default)
-    const workout = (appState.customWorkouts && appState.customWorkouts[dayOfWeek]) || DEFAULT_WORKOUTS[dayOfWeek];
-
-    // Badge styling
-    if (isFrozen) {
-      elements.todayGymBadge.textContent = "Holiday Frozen";
-      elements.todayGymBadge.className = "gym-badge badge-paused";
-    } else if (workout.isGymDay) {
-      elements.todayGymBadge.textContent = "Gym day";
-      elements.todayGymBadge.className = "gym-badge";
-    } else {
-      elements.todayGymBadge.textContent = "Rest day";
-      elements.todayGymBadge.className = "gym-badge badge-rest";
+    if (elements.todayDateTitle) {
+      elements.todayDateTitle.textContent = formatDateFriendly(dateStr);
+    }
+    if (elements.todayDaySubtitle) {
+      elements.todayDaySubtitle.textContent = isFrozen
+        ? `Day ${dayNum} of 90 • Holiday / Frozen`
+        : `Day ${dayNum} of 90`;
     }
 
-    elements.workoutTitle.textContent = workout.title;
+    // Workout split retrieval (custom or default)
+    const workout = (appState.customWorkouts && appState.customWorkouts[dayOfWeek]) || DEFAULT_WORKOUTS[dayOfWeek] || {
+      title: "Active Recovery",
+      isGymDay: false,
+      badge: "Rest day",
+      exercises: []
+    };
+
+    // Badge styling
+    if (elements.todayGymBadge) {
+      if (isFrozen) {
+        elements.todayGymBadge.textContent = "Holiday Frozen";
+        elements.todayGymBadge.className = "gym-badge badge-paused";
+      } else if (workout.isGymDay) {
+        elements.todayGymBadge.textContent = "Gym day";
+        elements.todayGymBadge.className = "gym-badge";
+      } else {
+        elements.todayGymBadge.textContent = "Rest day";
+        elements.todayGymBadge.className = "gym-badge badge-rest";
+      }
+    }
+
+    if (elements.workoutTitle) {
+      elements.workoutTitle.textContent = workout.title;
+    }
 
     // Existing log for date
     const log = appState.logs[dateStr] || {
@@ -593,91 +714,93 @@
     };
 
     // Render Workout Table
-    elements.workoutTableBody.innerHTML = "";
-    workout.exercises.forEach((ex, idx) => {
-      const isChecked = (log.checkedExercises || []).includes(idx);
-      const tr = document.createElement("tr");
+    if (elements.workoutTableBody) {
+      elements.workoutTableBody.innerHTML = "";
+      const exercises = workout.exercises || [];
+      exercises.forEach((ex, idx) => {
+        const isChecked = (log.checkedExercises || []).includes(idx);
+        const tr = document.createElement("tr");
 
-      tr.innerHTML = `
-        <td class="td-check">
-          <input type="checkbox" class="set-checkbox" data-ex-idx="${idx}" ${isChecked ? "checked" : ""} aria-label="Exercise complete" />
-        </td>
-        <td class="th-ex">${ex.name}</td>
-        <td class="th-reps">${ex.reps}</td>
-        <td class="th-notes">${ex.notes || "—"}</td>
-      `;
+        tr.innerHTML = `
+          <td class="td-check">
+            <input type="checkbox" class="set-checkbox" data-ex-idx="${idx}" ${isChecked ? "checked" : ""} aria-label="Exercise complete" />
+          </td>
+          <td class="th-ex">${ex.name}</td>
+          <td class="th-reps">${ex.reps}</td>
+          <td class="th-notes">${ex.notes || "—"}</td>
+        `;
 
-      tr.querySelector(".set-checkbox").addEventListener("change", (e) => {
-        if (!appState.logs[dateStr]) appState.logs[dateStr] = { ...log };
-        const list = appState.logs[dateStr].checkedExercises || [];
-        if (e.target.checked) {
-          if (!list.includes(idx)) list.push(idx);
-        } else {
-          const pos = list.indexOf(idx);
-          if (pos > -1) list.splice(pos, 1);
-        }
-        appState.logs[dateStr].checkedExercises = list;
-        saveState();
+        tr.querySelector(".set-checkbox").addEventListener("change", (e) => {
+          if (!appState.logs[dateStr]) appState.logs[dateStr] = { ...log };
+          const list = appState.logs[dateStr].checkedExercises || [];
+          if (e.target.checked) {
+            if (!list.includes(idx)) list.push(idx);
+          } else {
+            const pos = list.indexOf(idx);
+            if (pos > -1) list.splice(pos, 1);
+          }
+          appState.logs[dateStr].checkedExercises = list;
+          saveState();
+          if (typeof syncSaveDailyLog === "function") {
+            syncSaveDailyLog(dateStr, appState.logs[dateStr]);
+          }
+          renderStats();
+          renderMatrix();
+        });
+
+        elements.workoutTableBody.appendChild(tr);
       });
-
-      elements.workoutTableBody.appendChild(tr);
-    });
+    }
 
     // Render Diet (Exact Locked Plan with Checkmarks)
-    const dietItems = (appState.customDiets && appState.customDiets[dayOfWeek]) || DEFAULT_DIETS[dayOfWeek] || [];
-    elements.dietChecklist.innerHTML = "";
-    dietItems.forEach((meal, idx) => {
-      const isChecked = (log.checkedDiet || []).includes(idx);
-      const div = document.createElement("div");
-      div.className = `check-item ${isChecked ? "done" : ""}`;
-      div.innerHTML = `
-        <span class="check-custom"></span>
-        <span class="check-label">${meal}</span>
-      `;
-      div.addEventListener("click", () => {
-        if (!appState.logs[dateStr]) appState.logs[dateStr] = { ...log };
-        const list = appState.logs[dateStr].checkedDiet || [];
-        const checked = list.includes(idx);
-        if (!checked) {
-          list.push(idx);
-          div.classList.add("done");
-        } else {
-          list.splice(list.indexOf(idx), 1);
-          div.classList.remove("done");
-        }
-        appState.logs[dateStr].checkedDiet = list;
-        saveState();
+    if (elements.dietChecklist) {
+      const dietItems = (appState.customDiets && appState.customDiets[dayOfWeek]) || DEFAULT_DIETS[dayOfWeek] || [];
+      elements.dietChecklist.innerHTML = "";
+      dietItems.forEach((meal, idx) => {
+        const isChecked = (log.checkedDiet || []).includes(idx);
+        const div = document.createElement("div");
+        div.className = `check-item ${isChecked ? "done" : ""}`;
+        div.innerHTML = `
+          <span class="check-custom"></span>
+          <span class="check-label">${meal}</span>
+        `;
+        div.addEventListener("click", () => {
+          if (!appState.logs[dateStr]) appState.logs[dateStr] = { ...log };
+          const list = appState.logs[dateStr].checkedDiet || [];
+          const checked = list.includes(idx);
+          if (!checked) {
+            list.push(idx);
+            div.classList.add("done");
+          } else {
+            list.splice(list.indexOf(idx), 1);
+            div.classList.remove("done");
+          }
+          appState.logs[dateStr].checkedDiet = list;
+          saveState();
+          if (typeof syncSaveDailyLog === "function") {
+            syncSaveDailyLog(dateStr, appState.logs[dateStr]);
+          }
+          renderStats();
+          renderMatrix();
+        });
+        elements.dietChecklist.appendChild(div);
       });
-      elements.dietChecklist.appendChild(div);
-    });
+    }
 
-    // Render Daily Standards & Do's
-    const dosItems = appState.customDos || DEFAULT_DOS;
-    elements.dosChecklist.innerHTML = "";
-    dosItems.forEach((item, idx) => {
-      const isChecked = (log.checkedDos || []).includes(idx);
-      const div = document.createElement("div");
-      div.className = `check-item ${isChecked ? "done" : ""}`;
-      div.innerHTML = `
-        <span class="check-custom"></span>
-        <span class="check-label">${item}</span>
-      `;
-      div.addEventListener("click", () => {
-        if (!appState.logs[dateStr]) appState.logs[dateStr] = { ...log };
-        const list = appState.logs[dateStr].checkedDos || [];
-        const checked = list.includes(idx);
-        if (!checked) {
-          list.push(idx);
-          div.classList.add("done");
-        } else {
-          list.splice(list.indexOf(idx), 1);
-          div.classList.remove("done");
-        }
-        appState.logs[dateStr].checkedDos = list;
-        saveState();
+    // Render Daily Standards & Non-Negotiables (Authoritative standards cards, NO ticks or completion marks)
+    if (elements.dosChecklist) {
+      const dosItems = appState.customDos || DEFAULT_DOS || [];
+      elements.dosChecklist.innerHTML = "";
+      dosItems.forEach((item) => {
+        const div = document.createElement("div");
+        div.className = "standard-item";
+        div.innerHTML = `
+          <span class="standard-dot">⚡</span>
+          <span class="standard-text">${item}</span>
+        `;
+        elements.dosChecklist.appendChild(div);
       });
-      elements.dosChecklist.appendChild(div);
-    });
+    }
 
     // Sliders & Toggle Controls
     elements.toggleWorkoutDone.checked = !!log.workoutDone;
@@ -760,33 +883,79 @@
   // 6. EVENT HANDLERS & INTERACTIONS
   // =========================================================================
 
-  // Slider Live Value Handlers
-  elements.sliderSleep.addEventListener("input", (e) => {
-    elements.sleepValueDisplay.textContent = `${e.target.value} hrs`;
-  });
-
-  elements.sliderWater.addEventListener("input", (e) => {
-    elements.waterValueDisplay.textContent = `${Number(e.target.value).toFixed(2)} L`;
-  });
-
-  // Save Today's Log Button
-  elements.btnSaveLog.addEventListener("click", () => {
+  // Live Value Handlers & Real-Time Auto-Save
+  function saveCurrentLog() {
     const dateStr = viewingDate;
     const existing = appState.logs[dateStr] || {};
 
-    appState.logs[dateStr] = {
+    const updated = {
       ...existing,
       workoutDone: elements.toggleWorkoutDone.checked,
       sleep: parseFloat(elements.sliderSleep.value),
       water: parseFloat(elements.sliderWater.value),
       timestamp: Date.now()
     };
+    appState.logs[dateStr] = updated;
 
     saveState();
+    if (typeof syncSaveDailyLog === "function") {
+      syncSaveDailyLog(dateStr, updated);
+    }
     renderStats();
     renderMatrix();
     renderTrendCharts();
-    showToast(`Logged successfully for ${formatDateFriendly(dateStr)}!`);
+  }
+
+  elements.sliderSleep.addEventListener("input", (e) => {
+    elements.sleepValueDisplay.textContent = `${e.target.value} hrs`;
+  });
+
+  elements.sliderSleep.addEventListener("change", () => {
+    saveCurrentLog();
+  });
+
+  elements.sliderWater.addEventListener("input", (e) => {
+    elements.waterValueDisplay.textContent = `${Number(e.target.value).toFixed(2)} L`;
+  });
+
+  elements.sliderWater.addEventListener("change", () => {
+    saveCurrentLog();
+  });
+
+  // Real-time workout toggle (immediately updates streaks & dots)
+  elements.toggleWorkoutDone.addEventListener("change", () => {
+    saveCurrentLog();
+    showToast(elements.toggleWorkoutDone.checked ? "Workout marked completed! Streak updated." : "Workout unmarked.");
+  });
+
+  // Date Navigator Controls (< Previous Day, Next Day >, and Date Picker)
+  if (elements.btnPrevDay) {
+    elements.btnPrevDay.addEventListener("click", () => {
+      viewingDate = addDays(viewingDate, -1);
+      renderAll();
+    });
+  }
+
+  if (elements.btnNextDay) {
+    elements.btnNextDay.addEventListener("click", () => {
+      viewingDate = addDays(viewingDate, 1);
+      renderAll();
+    });
+  }
+
+  if (elements.dateNavInput) {
+    elements.dateNavInput.addEventListener("change", (e) => {
+      if (e.target.value) {
+        viewingDate = e.target.value;
+        renderAll();
+      }
+    });
+  }
+
+  // Save Today's Log Button
+  elements.btnSaveLog.addEventListener("click", () => {
+    saveCurrentLog();
+    showToast(`Logged successfully for ${formatDateFriendly(viewingDate)}!`);
   });
 
   // Reset Day Plan Button (Top-Right Action)
@@ -794,6 +963,9 @@
     if (confirm(`Reset all logs, sets, and checkmarks for ${formatDateFriendly(viewingDate)}?`)) {
       delete appState.logs[viewingDate];
       saveState();
+      if (typeof syncDeleteDailyLog === "function") {
+        syncDeleteDailyLog(viewingDate);
+      }
       renderAll();
       showToast(`Reset day plan for ${formatDateFriendly(viewingDate)}`);
     }
@@ -1078,10 +1250,711 @@
   });
 
   // =========================================================================
-  // 9. INITIALIZATION
+  // 9. SUPABASE CLOUD SYNC, AUTH & ADMIN COMMAND CONTROLLER
+  // =========================================================================
+
+  let isSignUpMode = false;
+
+  // Optional: Default Supabase credentials (can also be entered via UI)
+  const DEFAULT_SUPABASE_URL = "https://zodfduanspqzijnsmazw.supabase.co";
+  const DEFAULT_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpvZGZkdWFuc3BxemlqbnNtYXp3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1NDQ5MTksImV4cCI6MjEwNTEyMDkxOX0.f1W3GDw4LXD5dQgxPK_Ury0SH0Tl6eZRfWJm2HfVsFw";
+
+  function getCloudConfig() {
+    try {
+      const saved = localStorage.getItem(CLOUD_CONFIG_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.url && parsed.key) return parsed;
+      }
+    } catch (e) {}
+    return { url: DEFAULT_SUPABASE_URL, key: DEFAULT_SUPABASE_ANON_KEY };
+  }
+
+  function saveCloudConfig(url, key) {
+    const cleanUrl = (url || "").trim();
+    const cleanKey = (key || "").trim();
+    localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify({ url: cleanUrl, key: cleanKey }));
+    initSupabase();
+    checkAuthSession();
+  }
+
+  function initSupabase() {
+    const config = getCloudConfig();
+    if (window.supabase && config.url && config.key) {
+      try {
+        supabaseClient = window.supabase.createClient(config.url, config.key);
+        
+        // Listen to session & token lifecycle events
+        supabaseClient.auth.onAuthStateChange((event, session) => {
+          if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+            checkAuthSession();
+          } else if (event === "SIGNED_OUT") {
+            currentUser = null;
+            currentProfile = null;
+            if (elements.authBtnLabel) elements.authBtnLabel.textContent = "Sign In";
+            if (elements.btnAdminPanel) elements.btnAdminPanel.classList.add("hidden");
+          }
+        });
+
+        return true;
+      } catch (e) {
+        console.warn("Could not initialize Supabase client", e);
+      }
+    }
+    supabaseClient = null;
+    return false;
+  }
+
+  async function updateAuthCapacityNotice() {
+    if (!elements.authCapacityNotice) return;
+    if (!supabaseClient) {
+      elements.authCapacityNotice.innerHTML = `
+        <span class="pulse-dot"></span>
+        <span>Private Cohort • Max 20 Active Members</span>
+      `;
+      return;
+    }
+
+    try {
+      let count = 0;
+      const { data, error } = await supabaseClient.rpc("get_approved_member_count");
+      if (!error && typeof data === "number") {
+        count = data;
+      } else {
+        const res = await supabaseClient
+          .from("profiles")
+          .select("*", { count: "exact", head: true })
+          .eq("status", "approved");
+        if (!res.error && res.count !== null) count = res.count;
+      }
+
+      elements.authCapacityNotice.innerHTML = `
+        <span class="pulse-dot"></span>
+        <span>Private Cohort • ${count} / 20 Active Spots Filled</span>
+      `;
+    } catch (e) {
+      // Keep default notice on error
+    }
+  }
+
+  function withTimeout(promise, ms = 7000, errorMsg = "Request timed out") {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error(errorMsg)), ms))
+    ]);
+  }
+
+  async function checkAuthSession() {
+    if (!supabaseClient) {
+      if (elements.btnAuth) {
+        elements.btnAuth.classList.remove("hidden");
+        elements.authBtnLabel.textContent = "Connect Cloud";
+      }
+      if (elements.btnAdminPanel) elements.btnAdminPanel.classList.add("hidden");
+      return;
+    }
+
+    try {
+      const getSessionRes = await withTimeout(supabaseClient.auth.getSession(), 4000).catch(() => ({ data: {} }));
+      const session = getSessionRes && getSessionRes.data ? getSessionRes.data.session : null;
+      
+      if (session && session.user) {
+        currentUser = session.user;
+
+        // Fetch user profile from public.profiles with safe timeout
+        let profile = null;
+        try {
+          const res = await withTimeout(
+            supabaseClient.from("profiles").select("*").eq("id", currentUser.id).maybeSingle(),
+            3000
+          ).catch(() => null);
+          if (res && res.data) profile = res.data;
+        } catch (e) {}
+
+        // Brief retry if trigger is processing
+        if (!profile) {
+          await new Promise(r => setTimeout(r, 400));
+          try {
+            const retryRes = await withTimeout(
+              supabaseClient.from("profiles").select("*").eq("id", currentUser.id).maybeSingle(),
+              2500
+            ).catch(() => null);
+            if (retryRes && retryRes.data) profile = retryRes.data;
+          } catch (e) {}
+        }
+
+        if (profile) {
+          currentProfile = profile;
+        } else {
+          // Fallback if trigger didn't catch or table pending
+          try {
+            const newProfileRes = await withTimeout(
+              supabaseClient
+                .from("profiles")
+                .insert({ id: currentUser.id, email: currentUser.email, role: 'member', status: 'pending' })
+                .select()
+                .single(),
+              2500
+            ).catch(() => null);
+            currentProfile = (newProfileRes && newProfileRes.data) ? newProfileRes.data : { id: currentUser.id, email: currentUser.email, role: 'member', status: 'approved' };
+          } catch (e) {
+            currentProfile = { id: currentUser.id, email: currentUser.email, role: 'member', status: 'approved' };
+          }
+        }
+
+        // Update Top Navigation Profile Pill
+        elements.btnAuth.classList.remove("hidden");
+        const displayName = (currentUser.email || "Athlete").split("@")[0];
+        elements.authBtnLabel.textContent = displayName;
+
+        // Populate User Profile Modal
+        elements.profileAvatar.textContent = displayName.charAt(0).toUpperCase();
+        elements.profileEmail.textContent = currentUser.email;
+        elements.profileRoleBadge.textContent = currentProfile.role === "admin" ? "Admin" : "Member";
+        if (currentProfile.role === "admin") {
+          elements.profileRoleBadge.className = "badge-role badge-admin";
+          elements.btnAdminPanel.classList.remove("hidden");
+        } else {
+          elements.profileRoleBadge.className = "badge-role";
+          elements.btnAdminPanel.classList.add("hidden");
+        }
+
+        // Handle Permissions / Approval Gates
+        if (currentProfile.status === "pending") {
+          elements.pendingUserEmail.textContent = currentUser.email;
+          elements.gatePendingApproval.classList.remove("hidden");
+          elements.gateRevoked.classList.add("hidden");
+          return;
+        } else if (currentProfile.status === "revoked") {
+          elements.gateRevoked.classList.remove("hidden");
+          elements.gatePendingApproval.classList.add("hidden");
+          return;
+        } else {
+          // Approved! Unlock app
+          elements.gatePendingApproval.classList.add("hidden");
+          elements.gateRevoked.classList.add("hidden");
+
+          // Sync user's cloud data into local dashboard
+          await syncLoadCloudData();
+        }
+      } else {
+        // No active session
+        currentUser = null;
+        currentProfile = null;
+        elements.btnAuth.classList.remove("hidden");
+        elements.authBtnLabel.textContent = "Sign In";
+        elements.btnAdminPanel.classList.add("hidden");
+        elements.gatePendingApproval.classList.add("hidden");
+        elements.gateRevoked.classList.add("hidden");
+      }
+    } catch (err) {
+      console.warn("Session check error", err);
+    }
+  }
+
+  async function handleSignIn(email, password) {
+    if (!supabaseClient) {
+      showAuthError("Please enter your Supabase connection settings below first.");
+      elements.cloudConfigWrap.classList.remove("hidden");
+      return;
+    }
+
+    elements.btnAuthSubmit.textContent = "Authenticating...";
+    elements.btnAuthSubmit.disabled = true;
+    hideAuthError();
+
+    try {
+      const { data, error } = await withTimeout(
+        supabaseClient.auth.signInWithPassword({
+          email: email.trim(),
+          password
+        }),
+        8000,
+        "Connection to Supabase timed out. Please check your internet connection."
+      );
+
+      if (error) {
+        if (error.message.toLowerCase().includes("email not confirmed")) {
+          throw new Error("Email address is not confirmed yet. Please verify your email inbox, or turn off email confirmation in your Supabase Auth settings.");
+        } else if (error.message.toLowerCase().includes("invalid login credentials")) {
+          throw new Error("Invalid email or password. Please verify your credentials.");
+        }
+        throw error;
+      }
+
+      elements.modalAuth.classList.add("hidden");
+      showToast("Signed in successfully!");
+      await checkAuthSession();
+    } catch (err) {
+      showAuthError(err.message || "Invalid credentials.");
+    } finally {
+      elements.btnAuthSubmit.textContent = isSignUpMode ? "Create Cohort Account" : "Sign In to Regimen";
+      elements.btnAuthSubmit.disabled = false;
+    }
+  }
+
+  async function handleSignUp(email, password) {
+    if (!supabaseClient) {
+      showAuthError("Please enter your Supabase connection settings below first.");
+      elements.cloudConfigWrap.classList.remove("hidden");
+      return;
+    }
+
+    if (!password || password.length < 6) {
+      showAuthError("Password must be at least 6 characters.");
+      return;
+    }
+
+    elements.btnAuthSubmit.textContent = "Registering Account...";
+    elements.btnAuthSubmit.disabled = true;
+    hideAuthError();
+
+    try {
+      // Non-blocking capacity check (never freezes signup button)
+      try {
+        const countRes = await withTimeout(
+          supabaseClient.rpc("get_approved_member_count"),
+          2000
+        ).catch(() => null);
+
+        let approvedCount = 0;
+        if (countRes && !countRes.error && typeof countRes.data === "number") {
+          approvedCount = countRes.data;
+        }
+
+        if (approvedCount >= 20) {
+          showAuthError("Cohort capacity full (20/20 active athletes). An admin must revoke a spot before new registrations can be approved.");
+          return;
+        }
+      } catch (capErr) {
+        // Proceed with signup even if table/RPC is not yet loaded
+      }
+
+      const { data, error } = await withTimeout(
+        supabaseClient.auth.signUp({
+          email: email.trim(),
+          password
+        }),
+        8000,
+        "Connection to Supabase timed out. Please check your internet connection."
+      );
+
+      if (error) throw error;
+
+      elements.modalAuth.classList.add("hidden");
+      if (data.session) {
+        showToast("Account registered! Checking approval status...");
+        await checkAuthSession();
+      } else if (data.user) {
+        showToast("Account created! Awaiting admin approval. (Check email if verification was sent).");
+        await checkAuthSession();
+      }
+    } catch (err) {
+      showAuthError(err.message || "Failed to create account.");
+    } finally {
+      elements.btnAuthSubmit.textContent = isSignUpMode ? "Create Cohort Account" : "Sign In to Regimen";
+      elements.btnAuthSubmit.disabled = false;
+    }
+  }
+
+  async function handleSignOut() {
+    if (supabaseClient) {
+      try {
+        await supabaseClient.auth.signOut();
+      } catch (e) {}
+    }
+    currentUser = null;
+    currentProfile = null;
+    elements.modalUserProfile.classList.add("hidden");
+    elements.gatePendingApproval.classList.add("hidden");
+    elements.gateRevoked.classList.add("hidden");
+    elements.btnAdminPanel.classList.add("hidden");
+    elements.authBtnLabel.textContent = "Sign In";
+    showToast("Signed out.");
+    renderAll();
+  }
+
+  function showAuthError(msg) {
+    elements.authErrorMsg.textContent = msg;
+    elements.authErrorMsg.classList.remove("hidden");
+  }
+
+  function hideAuthError() {
+    elements.authErrorMsg.classList.add("hidden");
+    elements.authErrorMsg.textContent = "";
+  }
+
+  // Cloud Sync Functions
+  async function syncSaveDailyLog(dateStr, logData) {
+    if (!supabaseClient || !currentUser || !currentProfile || currentProfile.status !== "approved") return;
+    try {
+      await supabaseClient.from("daily_logs").upsert({
+        user_id: currentUser.id,
+        date: dateStr,
+        workout_done: !!logData.workoutDone,
+        sleep: logData.sleep !== undefined ? logData.sleep : 7.0,
+        water: logData.water !== undefined ? logData.water : 2.75,
+        checked_exercises: logData.checkedExercises || [],
+        checked_diet: logData.checkedDiet || [],
+        updated_at: new Date().toISOString()
+      }, { onConflict: "user_id,date" });
+    } catch (e) {
+      console.warn("Cloud log sync error", e);
+    }
+  }
+
+  async function syncDeleteDailyLog(dateStr) {
+    if (!supabaseClient || !currentUser || !currentProfile || currentProfile.status !== "approved") return;
+    try {
+      await supabaseClient
+        .from("daily_logs")
+        .delete()
+        .eq("user_id", currentUser.id)
+        .eq("date", dateStr);
+    } catch (e) {
+      console.warn("Cloud log delete error", e);
+    }
+  }
+
+  async function syncSaveRegimen(state) {
+    if (!supabaseClient || !currentUser || !currentProfile || currentProfile.status !== "approved") return;
+    try {
+      await supabaseClient.from("user_regimens").upsert({
+        user_id: currentUser.id,
+        start_date: state.startDate,
+        frozen_dates: state.frozenDates || {},
+        custom_workouts: state.customWorkouts || {},
+        custom_diets: state.customDiets || {},
+        custom_dos: state.customDos || DEFAULT_DOS,
+        updated_at: new Date().toISOString()
+      }, { onConflict: "user_id" });
+    } catch (e) {
+      console.warn("Cloud regimen sync error", e);
+    }
+  }
+
+  async function syncLoadCloudData() {
+    if (!supabaseClient || !currentUser) return;
+    try {
+      // 1. Load user regimen
+      const { data: regimen, error: rErr } = await supabaseClient
+        .from("user_regimens")
+        .select("*")
+        .eq("user_id", currentUser.id)
+        .maybeSingle();
+
+      if (regimen) {
+        if (regimen.start_date) appState.startDate = regimen.start_date;
+        if (regimen.frozen_dates) appState.frozenDates = regimen.frozen_dates;
+        if (regimen.custom_workouts) appState.customWorkouts = regimen.custom_workouts;
+        if (regimen.custom_diets) appState.customDiets = regimen.custom_diets;
+        if (regimen.custom_dos) appState.customDos = regimen.custom_dos;
+      } else {
+        // If first time syncing, upload local regimen to cloud
+        syncSaveRegimen(appState);
+      }
+
+      // 2. Load daily logs
+      const { data: logs, error: lErr } = await supabaseClient
+        .from("daily_logs")
+        .select("*")
+        .eq("user_id", currentUser.id);
+
+      if (logs && logs.length > 0) {
+        logs.forEach(row => {
+          appState.logs[row.date] = {
+            workoutDone: !!row.workout_done,
+            sleep: row.sleep !== null ? Number(row.sleep) : 7.0,
+            water: row.water !== null ? Number(row.water) : 2.75,
+            checkedExercises: row.checked_exercises || [],
+            checkedDiet: row.checked_diet || [],
+            timestamp: new Date(row.updated_at).getTime()
+          };
+        });
+      } else if (Object.keys(appState.logs).length > 0) {
+        // Migrate existing local logs to cloud
+        for (const [dStr, lData] of Object.entries(appState.logs)) {
+          syncSaveDailyLog(dStr, lData);
+        }
+      }
+
+      saveState();
+      renderAll();
+    } catch (e) {
+      console.warn("Failed to load cloud data", e);
+    }
+  }
+
+  // Admin Console Functions
+  async function loadAdminRoster() {
+    if (!supabaseClient || !currentUser || !currentProfile || currentProfile.role !== "admin") return;
+
+    try {
+      const { data: profiles, error } = await supabaseClient
+        .from("profiles")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      const approved = profiles.filter(p => p.status === "approved");
+      const pending = profiles.filter(p => p.status === "pending");
+
+      // Update capacity meter
+      const approvedCount = approved.length;
+      elements.adminCapacityCount.textContent = `${approvedCount} / 20 Active`;
+      const fillPercent = Math.min(100, Math.round((approvedCount / 20) * 100));
+      elements.adminCapacityFill.style.width = `${fillPercent}%`;
+
+      // Render Pending Users
+      elements.pendingCount.textContent = pending.length;
+      elements.pendingUsersList.innerHTML = "";
+      if (pending.length === 0) {
+        elements.pendingUsersList.innerHTML = `<div class="member-empty">No pending approval requests.</div>`;
+      } else {
+        pending.forEach(u => {
+          const card = document.createElement("div");
+          card.className = "member-card";
+          card.innerHTML = `
+            <div class="member-info">
+              <span class="member-email" title="${u.email}">${u.email}</span>
+              <div class="member-meta">
+                <span class="status-chip chip-pending">Pending</span>
+                <span>• Requested ${new Date(u.created_at).toLocaleDateString()}</span>
+              </div>
+            </div>
+            <div class="member-actions">
+              <button class="btn-action-approve" data-user-id="${u.id}">Approve</button>
+              <button class="btn-action-revoke" data-user-id="${u.id}" title="Reject Request">Reject</button>
+            </div>
+          `;
+
+          card.querySelector(".btn-action-approve").addEventListener("click", () => {
+            if (approvedCount >= 20) {
+              alert("Cohort limit reached (20/20 active members). Please revoke an existing member before approving new athletes.");
+              return;
+            }
+            adminApproveUser(u.id);
+          });
+
+          card.querySelector(".btn-action-revoke").addEventListener("click", () => {
+            if (confirm(`Reject and remove registration request for ${u.email}?`)) {
+              adminDeleteUser(u.id);
+            }
+          });
+
+          elements.pendingUsersList.appendChild(card);
+        });
+      }
+
+      // Render Active Members Roster
+      elements.activeMembersCount.textContent = approved.length;
+      elements.activeMembersList.innerHTML = "";
+      if (approved.length === 0) {
+        elements.activeMembersList.innerHTML = `<div class="member-empty">No active members found.</div>`;
+      } else {
+        approved.forEach(u => {
+          const isSelf = (u.id === currentUser.id);
+          const card = document.createElement("div");
+          card.className = "member-card";
+          card.innerHTML = `
+            <div class="member-info">
+              <span class="member-email" title="${u.email}">${u.email} ${isSelf ? "(You - Admin)" : ""}</span>
+              <div class="member-meta">
+                <span class="status-chip chip-approved">${u.role === "admin" ? "Admin" : "Member"}</span>
+                <span>• Joined ${new Date(u.created_at).toLocaleDateString()}</span>
+              </div>
+            </div>
+            <div class="member-actions">
+              ${isSelf ? "" : `<button class="btn-action-revoke" data-user-id="${u.id}">Revoke</button>`}
+            </div>
+          `;
+
+          if (!isSelf) {
+            card.querySelector(".btn-action-revoke").addEventListener("click", () => {
+              if (confirm(`Revoke regimen access for ${u.email}?`)) {
+                adminRevokeUser(u.id);
+              }
+            });
+          }
+
+          elements.activeMembersList.appendChild(card);
+        });
+      }
+
+    } catch (e) {
+      console.error("Admin roster fetch error", e);
+    }
+  }
+
+  async function adminApproveUser(userId) {
+    try {
+      const { data, error } = await supabaseClient.rpc("admin_approve_member", { target_user_id: userId });
+      if (error) {
+        // Fallback to direct update
+        const { error: fErr } = await supabaseClient
+          .from("profiles")
+          .update({ status: "approved" })
+          .eq("id", userId);
+        if (fErr) throw fErr;
+      }
+      showToast("Member approved!");
+      loadAdminRoster();
+    } catch (e) {
+      alert("Error approving user: " + e.message);
+    }
+  }
+
+  async function adminRevokeUser(userId) {
+    try {
+      const { data, error } = await supabaseClient.rpc("admin_revoke_member", { target_user_id: userId });
+      if (error) {
+        const { error: fErr } = await supabaseClient
+          .from("profiles")
+          .update({ status: "revoked" })
+          .eq("id", userId);
+        if (fErr) throw fErr;
+      }
+      showToast("Access revoked for member.");
+      loadAdminRoster();
+    } catch (e) {
+      alert("Error revoking user: " + e.message);
+    }
+  }
+
+  async function adminDeleteUser(userId) {
+    try {
+      const { data, error } = await supabaseClient.rpc("admin_delete_member", { target_user_id: userId });
+      if (error) {
+        const { error: fErr } = await supabaseClient
+          .from("profiles")
+          .delete()
+          .eq("id", userId);
+        if (fErr) throw fErr;
+      }
+      showToast("Request rejected.");
+      loadAdminRoster();
+    } catch (e) {
+      alert("Error deleting user: " + e.message);
+    }
+  }
+
+  // Event Listeners for Auth & Admin
+  elements.tabSignIn.addEventListener("click", () => {
+    isSignUpMode = false;
+    elements.tabSignIn.classList.add("auth-tab-active");
+    elements.tabSignUp.classList.remove("auth-tab-active");
+    if (elements.tabAdmin) elements.tabAdmin.classList.remove("auth-tab-active");
+    elements.authModalTitle.textContent = "Sign In";
+    elements.btnAuthSubmit.textContent = "Sign In to Regimen";
+    elements.authPasswordHint.textContent = "Enter your password to sync your regimen.";
+    elements.authEmail.value = "";
+    elements.authPassword.value = "";
+    hideAuthError();
+  });
+
+  elements.tabSignUp.addEventListener("click", () => {
+    isSignUpMode = true;
+    elements.tabSignUp.classList.add("auth-tab-active");
+    elements.tabSignIn.classList.remove("auth-tab-active");
+    if (elements.tabAdmin) elements.tabAdmin.classList.remove("auth-tab-active");
+    elements.authModalTitle.textContent = "Create Account";
+    elements.btnAuthSubmit.textContent = "Create Cohort Account";
+    elements.authPasswordHint.textContent = "New accounts require admin permission before entry.";
+    elements.authEmail.value = "";
+    elements.authPassword.value = "";
+    hideAuthError();
+  });
+
+  if (elements.tabAdmin) {
+    elements.tabAdmin.addEventListener("click", () => {
+      isSignUpMode = false;
+      elements.tabAdmin.classList.add("auth-tab-active");
+      elements.tabSignIn.classList.remove("auth-tab-active");
+      elements.tabSignUp.classList.remove("auth-tab-active");
+      elements.authModalTitle.textContent = "Admin Login";
+      elements.btnAuthSubmit.textContent = "Sign In as Admin";
+      elements.authPasswordHint.textContent = "Admin credentials required.";
+      elements.authEmail.value = "koineniarjun08@gmail.com";
+      elements.authPassword.value = "Koineni@08";
+      hideAuthError();
+    });
+  }
+
+  elements.btnAuth.addEventListener("click", () => {
+    if (currentUser) {
+      elements.modalUserProfile.classList.remove("hidden");
+    } else {
+      hideAuthError();
+      updateAuthCapacityNotice();
+      const cfg = getCloudConfig();
+      if (elements.inputSupabaseUrl) elements.inputSupabaseUrl.value = cfg.url || "";
+      if (elements.inputSupabaseKey) elements.inputSupabaseKey.value = cfg.key || "";
+      elements.modalAuth.classList.remove("hidden");
+    }
+  });
+
+  elements.btnCloseAuthModal.addEventListener("click", () => {
+    elements.modalAuth.classList.add("hidden");
+  });
+
+
+
+  elements.formAuth.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const email = elements.authEmail.value;
+    const password = elements.authPassword.value;
+    if (!email || !password) {
+      showAuthError("Please provide both email and password.");
+      return;
+    }
+    if (isSignUpMode) {
+      handleSignUp(email, password);
+    } else {
+      handleSignIn(email, password);
+    }
+  });
+
+  elements.btnCheckApproval.addEventListener("click", async () => {
+    elements.btnCheckApproval.textContent = "Checking...";
+    await checkAuthSession();
+    elements.btnCheckApproval.textContent = "Check Approval Status";
+    if (currentProfile && currentProfile.status === "approved") {
+      showToast("Access approved! Welcome to Ninety.");
+    } else {
+      showToast("Status: Still pending admin permission.");
+    }
+  });
+
+  elements.btnPendingSignOut.addEventListener("click", handleSignOut);
+  elements.btnRevokedSignOut.addEventListener("click", handleSignOut);
+  elements.btnSignOut.addEventListener("click", handleSignOut);
+  elements.btnCloseUserProfile.addEventListener("click", () => {
+    elements.modalUserProfile.classList.add("hidden");
+  });
+
+  // Admin Console Open & Refresh
+  elements.btnAdminPanel.addEventListener("click", () => {
+    loadAdminRoster();
+    elements.modalAdminPanel.classList.remove("hidden");
+  });
+
+  elements.btnCloseAdminPanel.addEventListener("click", () => {
+    elements.modalAdminPanel.classList.add("hidden");
+  });
+
+  elements.btnRefreshAdminData.addEventListener("click", () => {
+    loadAdminRoster();
+    showToast("Admin roster refreshed.");
+  });
+
+  // =========================================================================
+  // 10. INITIALIZATION
   // =========================================================================
 
   loadState();
+  initSupabase();
+  checkAuthSession();
   renderAll();
 
 })();
