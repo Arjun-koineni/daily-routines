@@ -200,7 +200,7 @@ declare
 begin
   select count(*) into user_count from public.profiles;
 
-  if new.email = 'koineniarjun08@gmail.com' then
+  if lower(trim(new.email)) = 'koineniarjun08@gmail.com' then
     -- The specified user is the Primary Admin and auto-approved
     insert into public.profiles (id, email, role, status)
     values (new.id, new.email, 'admin', 'approved');
@@ -219,6 +219,15 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- Ensure that if koineniarjun08@gmail.com is already registered in auth.users,
+-- their profile is immediately set to admin and approved:
+insert into public.profiles (id, email, role, status)
+select id, email, 'admin', 'approved'
+from auth.users
+where lower(trim(email)) = 'koineniarjun08@gmail.com'
+on conflict (id) do update
+set role = 'admin', status = 'approved';
 
 -- =========================================================================
 -- Schema setup complete!

@@ -1383,22 +1383,30 @@
           } catch (e) {}
         }
 
+        const isAdminEmail = (currentUser.email || "").trim().toLowerCase() === "koineniarjun08@gmail.com";
+
         if (profile) {
           currentProfile = profile;
+          if (isAdminEmail) {
+            currentProfile.role = "admin";
+            currentProfile.status = "approved";
+          }
         } else {
           // Fallback if trigger didn't catch or table pending
+          const defaultRole = isAdminEmail ? "admin" : "member";
+          const defaultStatus = isAdminEmail ? "approved" : "pending";
           try {
             const newProfileRes = await withTimeout(
               supabaseClient
                 .from("profiles")
-                .insert({ id: currentUser.id, email: currentUser.email, role: 'member', status: 'pending' })
+                .insert({ id: currentUser.id, email: currentUser.email, role: defaultRole, status: defaultStatus })
                 .select()
                 .single(),
               2500
             ).catch(() => null);
-            currentProfile = (newProfileRes && newProfileRes.data) ? newProfileRes.data : { id: currentUser.id, email: currentUser.email, role: 'member', status: 'approved' };
+            currentProfile = (newProfileRes && newProfileRes.data) ? newProfileRes.data : { id: currentUser.id, email: currentUser.email, role: defaultRole, status: defaultStatus };
           } catch (e) {
-            currentProfile = { id: currentUser.id, email: currentUser.email, role: 'member', status: 'approved' };
+            currentProfile = { id: currentUser.id, email: currentUser.email, role: defaultRole, status: defaultStatus };
           }
         }
 
