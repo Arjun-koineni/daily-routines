@@ -306,28 +306,35 @@
           gymDaysDone++;
         }
 
-        // Qualifying day for streak:
-        // Gym day: workoutDone is true.
-        // Rest day: logging workout, sleep, water, or diet qualifies.
-        const completedDay = isGymDay 
-          ? (log.workoutDone === true) 
-          : (log.workoutDone || log.sleep !== undefined || log.water !== undefined || (log.checkedDiet && log.checkedDiet.length > 0));
-
-        if (completedDay) {
-          tempStreak++;
-          if (tempStreak > bestStreak) bestStreak = tempStreak;
+        // Daily streak for GYM DAYS ONLY:
+        if (isGymDay) {
+          const completedWorkout = !!(log && log.workoutDone);
+          if (completedWorkout) {
+            tempStreak++;
+            if (tempStreak > bestStreak) bestStreak = tempStreak;
+          } else {
+            // If past gym day missed -> reset streak
+            // If today is a gym day and workout in progress -> preserve current streak
+            if (!isToday) {
+              tempStreak = 0;
+            }
+          }
         } else {
-          // If past day missed -> reset streak
-          // If today is in progress -> do NOT reset streak
-          if (!isToday) {
-            tempStreak = 0;
+          // Scheduled Rest Day:
+          // Rest days do NOT break the gym streak!
+          // If athlete completed an optional workout on a rest day, count as bonus streak day:
+          if (log && log.workoutDone) {
+            tempStreak++;
+            if (tempStreak > bestStreak) bestStreak = tempStreak;
           }
         }
       } else {
-        // Not logged and date is in the past -> reset streak
-        if (!isToday) {
+        // Not logged at all for this day
+        if (isGymDay && !isToday) {
+          // Past unlogged gym day resets gym streak
           tempStreak = 0;
         }
+        // Rest days without logs do not break the gym streak
       }
     }
 
@@ -437,6 +444,9 @@
     modalPause: document.getElementById("modalPause"),
     btnClosePauseModal: document.getElementById("btnClosePauseModal"),
     pauseReason: document.getElementById("pauseReason"),
+    pauseDaysCount: document.getElementById("pauseDaysCount"),
+    pausePreviewText: document.getElementById("pausePreviewText"),
+    btnResumeRegimen: document.getElementById("btnResumeRegimen"),
     freezeCurrentState: document.getElementById("freezeCurrentState"),
     btnToggleFreeze: document.getElementById("btnToggleFreeze"),
 
@@ -551,7 +561,11 @@
         elements.bannerSub.textContent = `Today is paused (${appState.frozenDates[today]}). Streak is preserved.`;
         elements.btnBannerAction.textContent = "Resume Regimen";
         elements.btnBannerAction.onclick = () => {
-          delete appState.frozenDates[today];
+          let cur = today;
+          while (appState.frozenDates[cur]) {
+            delete appState.frozenDates[cur];
+            cur = addDays(cur, 1);
+          }
           saveState();
           renderAll();
           showToast("Regimen resumed!");
@@ -1019,12 +1033,85 @@
   // =========================================================================
 
   // Modal: Holiday Pause / Gym Freeze
+  let selectedPauseDays = 1;
+
+  function updatePausePreview() {
+    let days = parseInt(elements.pauseDaysCount ? elements.pauseDaysCount.value : "1", 10);
+    if (isNaN(days) || days < 1) days = 1;
+    if (days > 60) days = 60;
+    selectedPauseDays = days;
+    if (elements.pauseDaysCount) elements.pauseDaysCount.value = selectedPauseDays;
+
+    const startDate = viewingDate || getTodayDateString();
+    const endDate = addDays(startDate, selectedPauseDays - 1);
+    const resumeDate = addDays(startDate, selectedPauseDays);
+
+    if (elements.pausePreviewText) {
+      if (selectedPauseDays === 1) {
+        elements.pausePreviewText.textContent = `Pausing 1 day: ${formatDateFriendly(startDate)}. Regimen resumes on ${formatDateFriendly(resumeDate)}.`;
+      } else {
+        elements.pausePreviewText.textContent = `Pausing ${selectedPauseDays} days: from ${formatDateFriendly(startDate)} to ${formatDateFriendly(endDate)}. Regimen resumes on ${formatDateFriendly(resumeDate)}.`;
+      }
+    }
+    if (elements.btnToggleFreeze) {
+      elements.btnToggleFreeze.textContent = selectedPauseDays === 1 
+        ? "Activate Pause (1 Day)" 
+        : `Activate Pause (${selectedPauseDays} Days)`;
+    }
+
+    // Update active state on preset buttons
+    const presetBtns = document.querySelectorAll("#pausePresetsRow .btn-preset");
+    presetBtns.forEach(btn => {
+      const bDays = parseInt(btn.getAttribute("data-days"), 10);
+      if (bDays === selectedPauseDays) {
+        btn.classList.add("active");
+      } else {
+        btn.classList.remove("active");
+      }
+    });
+  }
+
+  // Preset buttons click listeners
+  const presetBtns = document.querySelectorAll("#pausePresetsRow .btn-preset");
+  presetBtns.forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      const days = parseInt(btn.getAttribute("data-days"), 10);
+      if (!isNaN(days) && elements.pauseDaysCount) {
+        elements.pauseDaysCount.value = days;
+        updatePausePreview();
+      }
+    });
+  });
+
+  if (elements.pauseDaysCount) {
+    elements.pauseDaysCount.addEventListener("input", () => {
+      updatePausePreview();
+    });
+  }
+
   elements.btnPauseGym.addEventListener("click", () => {
     const isFrozen = !!appState.frozenDates[viewingDate];
-    elements.freezeCurrentState.textContent = isFrozen
-      ? `Current State: Frozen for this date (${appState.frozenDates[viewingDate]})`
-      : `Current State: Active Regimen (Not Paused)`;
-    elements.btnToggleFreeze.textContent = isFrozen ? "Unpause (Resume Regimen)" : "Freeze This Day";
+
+    // Check consecutive frozen days starting from viewingDate
+    let consecutiveFrozen = 0;
+    let checkDate = viewingDate;
+    while (appState.frozenDates && appState.frozenDates[checkDate]) {
+      consecutiveFrozen++;
+      checkDate = addDays(checkDate, 1);
+    }
+
+    if (isFrozen) {
+      elements.freezeCurrentState.textContent = `Current State: Frozen for ${consecutiveFrozen} day(s) starting ${formatDateFriendly(viewingDate)} (${appState.frozenDates[viewingDate]})`;
+      if (elements.btnResumeRegimen) elements.btnResumeRegimen.classList.remove("hidden");
+    } else {
+      elements.freezeCurrentState.textContent = `Current State: Active Regimen (Not Paused)`;
+      if (elements.btnResumeRegimen) elements.btnResumeRegimen.classList.add("hidden");
+    }
+
+    selectedPauseDays = isFrozen ? Math.max(1, consecutiveFrozen) : 1;
+    if (elements.pauseDaysCount) elements.pauseDaysCount.value = selectedPauseDays;
+    updatePausePreview();
     elements.modalPause.classList.remove("hidden");
   });
 
@@ -1033,19 +1120,44 @@
   });
 
   elements.btnToggleFreeze.addEventListener("click", () => {
-    const isFrozen = !!appState.frozenDates[viewingDate];
-    if (isFrozen) {
-      delete appState.frozenDates[viewingDate];
-      showToast("Unpaused! Regimen active.");
-    } else {
-      const reason = elements.pauseReason.value.trim() || "Holiday / Travel";
-      appState.frozenDates[viewingDate] = reason;
-      showToast("Day frozen! 90-day streak is preserved.");
+    const count = parseInt(elements.pauseDaysCount ? elements.pauseDaysCount.value : "1", 10) || 1;
+    const reason = elements.pauseReason.value.trim() || "Holiday / Travel";
+    const startDate = viewingDate || getTodayDateString();
+
+    if (!appState.frozenDates) appState.frozenDates = {};
+    for (let i = 0; i < count; i++) {
+      const freezeDate = addDays(startDate, i);
+      appState.frozenDates[freezeDate] = reason;
     }
+
     saveState();
+    showToast(`Regimen paused for ${count} day(s)! Gym streak is protected.`);
     elements.modalPause.classList.add("hidden");
     renderAll();
   });
+
+  if (elements.btnResumeRegimen) {
+    elements.btnResumeRegimen.addEventListener("click", () => {
+      const startDate = viewingDate || getTodayDateString();
+
+      // Remove contiguous frozen days starting from startDate
+      let cur = startDate;
+      let unpausedCount = 0;
+      if (appState.frozenDates) {
+        while (appState.frozenDates[cur]) {
+          delete appState.frozenDates[cur];
+          unpausedCount++;
+          cur = addDays(cur, 1);
+        }
+        delete appState.frozenDates[startDate];
+      }
+
+      saveState();
+      showToast(`Regimen resumed! Unpaused ${Math.max(1, unpausedCount)} day(s).`);
+      elements.modalPause.classList.add("hidden");
+      renderAll();
+    });
+  }
 
   // Modal: Edit Workout Split
   elements.btnEditWorkout.addEventListener("click", () => {

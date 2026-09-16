@@ -78,11 +78,11 @@
       <div class="stat-meta">
         <div class="stat-item">
           <span class="stat-num" id="statCurrentStreak">0</span>
-          <span class="stat-lbl">current streak</span>
+          <span class="stat-lbl">gym streak</span>
         </div>
         <div class="stat-item">
           <span class="stat-num" id="statBestStreak">0</span>
-          <span class="stat-lbl">best streak</span>
+          <span class="stat-lbl">best gym streak</span>
         </div>
         <div class="stat-item">
           <span class="stat-num" id="statGymRatio">0/65</span>
@@ -374,19 +374,45 @@
       </div>
       <div class="modal-body">
         <p class="modal-desc">
-          Going on vacation or unable to workout at home during holidays? Activate <strong>Gym Freeze</strong>.
-          Your streak will be protected and your 90-day finish line will automatically extend by the frozen days.
+          Going on vacation, injured, or unable to workout during holidays? Activate <strong>Gym Freeze</strong>.
+          Your gym streak will be protected and your 90-day finish line will automatically extend by the frozen days.
         </p>
         <div class="form-group">
           <label class="form-label" for="pauseReason">Reason / Tag:</label>
           <input type="text" id="pauseReason" class="form-input" placeholder="e.g. Festival Holidays / Travel" value="Holiday / Travel" />
         </div>
+        
+        <div class="form-group">
+          <label class="form-label">Number of Days to Pause:</label>
+          <div class="pause-presets-row" id="pausePresetsRow">
+            <button type="button" class="btn-preset active" data-days="1">1 Day</button>
+            <button type="button" class="btn-preset" data-days="2">2 Days</button>
+            <button type="button" class="btn-preset" data-days="3">3 Days</button>
+            <button type="button" class="btn-preset" data-days="5">5 Days</button>
+            <button type="button" class="btn-preset" data-days="7">7 Days</button>
+            <button type="button" class="btn-preset" data-days="14">14 Days</button>
+          </div>
+          <div class="pause-custom-row">
+            <label class="field-hint" for="pauseDaysCount">Custom duration:</label>
+            <div class="pause-input-wrap">
+              <input type="number" id="pauseDaysCount" class="form-input pause-days-input" min="1" max="60" value="1" />
+              <span class="pause-days-suffix">day(s)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="pause-preview-box" id="pausePreviewBox">
+          <span class="pause-preview-icon">📅</span>
+          <span class="pause-preview-text" id="pausePreviewText">Pausing 1 day: Today. Regimen resumes tomorrow.</span>
+        </div>
+
         <div class="freeze-status-box" id="freezeStatusBox">
-          <span class="freeze-tag" id="freezeCurrentState">Current State: Active (Not Paused)</span>
+          <span class="freeze-tag" id="freezeCurrentState">Current State: Active Regimen (Not Paused)</span>
         </div>
       </div>
       <div class="modal-footer">
-        <button id="btnToggleFreeze" class="btn-primary-gold">Toggle Pause (Freeze Today)</button>
+        <button id="btnResumeRegimen" class="btn-secondary hidden">Resume Regimen (Unpause)</button>
+        <button id="btnToggleFreeze" class="btn-primary-gold">Activate Pause (1 Day)</button>
       </div>
     </div>
   </div>
