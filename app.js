@@ -1987,6 +1987,14 @@
     if (currentUser) {
       elements.modalUserProfile.classList.remove("hidden");
     } else {
+      isSignUpMode = false;
+      elements.tabSignIn.classList.add("auth-tab-active");
+      elements.tabSignUp.classList.remove("auth-tab-active");
+      elements.authModalTitle.textContent = "Sign In";
+      elements.btnAuthSubmit.textContent = "Sign In to Regimen";
+      elements.authPasswordHint.textContent = "Enter your password to sync your regimen.";
+      elements.authEmail.value = "";
+      elements.authPassword.value = "";
       hideAuthError();
       updateAuthCapacityNotice();
       const cfg = getCloudConfig();
