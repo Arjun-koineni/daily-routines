@@ -476,8 +476,7 @@
     btnSaveSettings: document.getElementById("btnSaveSettings"),
     btnCloseSettings: document.getElementById("btnCloseSettings"),
 
-    // Top Bar Auth & Admin
-    btnAdminPanel: document.getElementById("btnAdminPanel"),
+    // Top Bar Auth
     btnAuth: document.getElementById("btnAuth"),
     authBtnLabel: document.getElementById("authBtnLabel"),
 
@@ -487,7 +486,6 @@
     btnCloseAuthModal: document.getElementById("btnCloseAuthModal"),
     tabSignIn: document.getElementById("tabSignIn"),
     tabSignUp: document.getElementById("tabSignUp"),
-    tabAdmin: document.getElementById("tabAdmin"),
     authCapacityNotice: document.getElementById("authCapacityNotice"),
     authErrorMsg: document.getElementById("authErrorMsg"),
     formAuth: document.getElementById("formAuth"),
@@ -515,6 +513,7 @@
     profileAvatar: document.getElementById("profileAvatar"),
     profileEmail: document.getElementById("profileEmail"),
     profileRoleBadge: document.getElementById("profileRoleBadge"),
+    btnProfileAdminConsole: document.getElementById("btnProfileAdminConsole"),
     btnSignOut: document.getElementById("btnSignOut"),
 
     // Admin Console
@@ -1404,7 +1403,7 @@
             currentUser = null;
             currentProfile = null;
             if (elements.authBtnLabel) elements.authBtnLabel.textContent = "Sign In";
-            if (elements.btnAdminPanel) elements.btnAdminPanel.classList.add("hidden");
+            if (elements.btnProfileAdminConsole) elements.btnProfileAdminConsole.classList.add("hidden");
           }
         });
 
@@ -1462,7 +1461,7 @@
         elements.btnAuth.classList.remove("hidden");
         elements.authBtnLabel.textContent = "Connect Cloud";
       }
-      if (elements.btnAdminPanel) elements.btnAdminPanel.classList.add("hidden");
+      if (elements.btnProfileAdminConsole) elements.btnProfileAdminConsole.classList.add("hidden");
       return;
     }
 
@@ -1533,10 +1532,10 @@
         elements.profileRoleBadge.textContent = currentProfile.role === "admin" ? "Admin" : "Member";
         if (currentProfile.role === "admin") {
           elements.profileRoleBadge.className = "badge-role badge-admin";
-          elements.btnAdminPanel.classList.remove("hidden");
+          if (elements.btnProfileAdminConsole) elements.btnProfileAdminConsole.classList.remove("hidden");
         } else {
           elements.profileRoleBadge.className = "badge-role";
-          elements.btnAdminPanel.classList.add("hidden");
+          if (elements.btnProfileAdminConsole) elements.btnProfileAdminConsole.classList.add("hidden");
         }
 
         // Handle Permissions / Approval Gates
@@ -1563,7 +1562,7 @@
         currentProfile = null;
         elements.btnAuth.classList.remove("hidden");
         elements.authBtnLabel.textContent = "Sign In";
-        elements.btnAdminPanel.classList.add("hidden");
+        if (elements.btnProfileAdminConsole) elements.btnProfileAdminConsole.classList.add("hidden");
         elements.gatePendingApproval.classList.add("hidden");
         elements.gateRevoked.classList.add("hidden");
       }
@@ -1688,7 +1687,7 @@
     elements.modalUserProfile.classList.add("hidden");
     elements.gatePendingApproval.classList.add("hidden");
     elements.gateRevoked.classList.add("hidden");
-    elements.btnAdminPanel.classList.add("hidden");
+    if (elements.btnProfileAdminConsole) elements.btnProfileAdminConsole.classList.add("hidden");
     elements.authBtnLabel.textContent = "Sign In";
     showToast("Signed out.");
     renderAll();
@@ -1959,12 +1958,11 @@
     }
   }
 
-  // Event Listeners for Auth & Admin
+  // Event Listeners for Auth
   elements.tabSignIn.addEventListener("click", () => {
     isSignUpMode = false;
     elements.tabSignIn.classList.add("auth-tab-active");
     elements.tabSignUp.classList.remove("auth-tab-active");
-    if (elements.tabAdmin) elements.tabAdmin.classList.remove("auth-tab-active");
     elements.authModalTitle.textContent = "Sign In";
     elements.btnAuthSubmit.textContent = "Sign In to Regimen";
     elements.authPasswordHint.textContent = "Enter your password to sync your regimen.";
@@ -1977,7 +1975,6 @@
     isSignUpMode = true;
     elements.tabSignUp.classList.add("auth-tab-active");
     elements.tabSignIn.classList.remove("auth-tab-active");
-    if (elements.tabAdmin) elements.tabAdmin.classList.remove("auth-tab-active");
     elements.authModalTitle.textContent = "Create Account";
     elements.btnAuthSubmit.textContent = "Create Cohort Account";
     elements.authPasswordHint.textContent = "New accounts require admin permission before entry.";
@@ -1985,21 +1982,6 @@
     elements.authPassword.value = "";
     hideAuthError();
   });
-
-  if (elements.tabAdmin) {
-    elements.tabAdmin.addEventListener("click", () => {
-      isSignUpMode = false;
-      elements.tabAdmin.classList.add("auth-tab-active");
-      elements.tabSignIn.classList.remove("auth-tab-active");
-      elements.tabSignUp.classList.remove("auth-tab-active");
-      elements.authModalTitle.textContent = "Admin Login";
-      elements.btnAuthSubmit.textContent = "Sign In as Admin";
-      elements.authPasswordHint.textContent = "Admin credentials required.";
-      elements.authEmail.value = "koineniarjun08@gmail.com";
-      elements.authPassword.value = "Koineni@08";
-      hideAuthError();
-    });
-  }
 
   elements.btnAuth.addEventListener("click", () => {
     if (currentUser) {
@@ -2054,10 +2036,13 @@
   });
 
   // Admin Console Open & Refresh
-  elements.btnAdminPanel.addEventListener("click", () => {
-    loadAdminRoster();
-    elements.modalAdminPanel.classList.remove("hidden");
-  });
+  if (elements.btnProfileAdminConsole) {
+    elements.btnProfileAdminConsole.addEventListener("click", () => {
+      elements.modalUserProfile.classList.add("hidden");
+      loadAdminRoster();
+      elements.modalAdminPanel.classList.remove("hidden");
+    });
+  }
 
   elements.btnCloseAdminPanel.addEventListener("click", () => {
     elements.modalAdminPanel.classList.add("hidden");

@@ -33,10 +33,6 @@
 
       <!-- Top Right Action Cluster -->
       <div class="top-actions">
-        <button id="btnAdminPanel" class="icon-btn btn-admin hidden" title="Admin Control Console" aria-label="Admin Console">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-          <span class="btn-label">Admin</span>
-        </button>
         <button id="btnAuth" class="icon-btn btn-auth" title="Account & Sync" aria-label="Account">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           <span class="btn-label" id="authBtnLabel">Sign In</span>
@@ -520,7 +516,6 @@
         <div class="auth-tabs">
           <button id="tabSignIn" class="auth-tab auth-tab-active">Sign In</button>
           <button id="tabSignUp" class="auth-tab">Create Account</button>
-          <button id="tabAdmin" class="auth-tab">Admin Login</button>
         </div>
 
         <div class="squad-capacity-pill" id="authCapacityNotice">
@@ -608,7 +603,10 @@
             <span class="badge-role" id="profileRoleBadge">Member</span>
           </div>
         </div>
-        <p class="field-hint">Your 90-day progress is syncing across your phone and computer.</p>
+        <button id="btnProfileAdminConsole" class="btn-secondary hidden" style="margin-top: 14px; width: 100%; border-color: rgba(245, 158, 11, 0.4); color: var(--gold-primary);">
+          Squad Admin Console
+        </button>
+        <p class="field-hint" style="margin-top: 10px;">Your 90-day progress is syncing across your phone and computer.</p>
       </div>
       <div class="modal-footer">
         <button id="btnSignOut" class="btn-secondary text-danger">Sign Out</button>
